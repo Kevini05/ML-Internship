@@ -5,6 +5,8 @@ import itertools
 import BACchannel as bac
 import random as rd
 from polarcodes import *
+import time
+
 
 
 def plot_BSC_BAC(title, e0, error_probability,R):
@@ -112,20 +114,46 @@ def block_error_probability(N, k, C, e0, e1):
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
   return error_probability
 
+def block_error_rate(N, k, C, e0, e1):
+  """
+  :param N: coded message size
+  :param k: message size
+  :param C: Codebook
+  :return: error probability for all combinations of e0 and e1
+  """
+  U_k = bac.symbols_generator(k)  # all possible messages
+  Y_n = bac.symbols_generator(N)  # all possible symbol sequences
 
-def bit_error_probability(N, k, C, B, e0, e1, coded = True):
+  # e0 = np.linspace(0.1, 0.9, 9)
+  # e1 = np.linspace(0.1, 0.5, 5)
+
+  # print("0.00", '|', ["{:.4f}".format(ep1) for ep1 in e1])
+  # print('------------------------------------------------------------------')
+  error_probability = {}
+  for ep0 in e0:
+    row = []
+    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
+      if ep1 == ep0 or ep1 == e0[0]:
+        # if ep1 == 0.1:
+        a = bac.succes_probability(Y_n, C, U_k, ep0, ep1)
+        row.append(1 - a)
+    error_probability[ep0] = row
+    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
+  return error_probability
+
+
+def bit_error_rate(k, C, B, e0, e1, coded = True):
   # print(np.array(C))
   U_k = bac.symbols_generator(k)  # all possible messages
   # e0 = np.linspace(0.1, 0.9, 9)
   # e1 = np.linspace(0.1, 0.5, 5)
-
+  print(B)
   ber = {}
   for ep0 in e0:
     ber_row = []
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
         # if ep1 == 0.1:
-
         ber_tmp = 0  # for bit error rate
         # ser_tmp = 0  # for symbol error rate
         for t in range(B):
@@ -135,8 +163,10 @@ def bit_error_probability(N, k, C, B, e0, e1, coded = True):
 
           y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
           # ser_tmp += bac.NbOfErrors(x, y_bac)
-
+          start = time.time()
           u_map_bac = U_k[bac.MAP_BAC(y_bac, k, C, ep0, ep1) ] if coded else bac.MAP_BAC_uncoded(y_bac, ep0, ep1) # Detecteur MAP
+          end = time.time()
+          print(end - start)
           ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
           # print(u,u_map_bac,ber_tmp)
         ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
@@ -146,6 +176,87 @@ def bit_error_probability(N, k, C, B, e0, e1, coded = True):
     ber[ep0] = ber_row
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
   return ber
+
+
+def tensorflow_shutup():
+  """
+  Make Tensorflow less verbose
+  """
+  try:
+    # noinspection PyPackageRequirements
+    import os
+    from tensorflow import logging
+    logging.set_verbosity(logging.ERROR)
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+    # Monkey patching deprecation utils to shut it up! Maybe good idea to disable this once after upgrade
+    # noinspection PyUnusedLocal
+    def deprecated(date, instructions, warn_once=True):
+      def deprecated_wrapper(func):
+        return func
+
+      return deprecated_wrapper
+
+    from tensorflow.python.util import deprecation
+    deprecation.deprecated = deprecated
+
+  except ImportError:
+    pass
+
+
+def NN_decoder(y, codes, model,N):
+  yh = np.reshape(np.array(y), [1, N])
+  vector_prob = model.predict(yh)
+  id = np.argmax(vector_prob)
+  return codes[id]
+
+def bit_error_rate_NN(N, k, C, B, e0, e1):
+  print(B)
+  U_k = bac.symbols_generator(k)  # all possible messages
+
+  from keras.models import model_from_json
+  # load json and create model
+  tensorflow_shutup()
+  json_file = open('./model_decoder_bsc.json', 'r')
+  model_decoder_json = json_file.read()
+  json_file.close()
+  model_decoder = model_from_json(model_decoder_json)
+  # load weights into new model
+  model_decoder.load_weights("./weights_decoder_bsc.h5")
+  print("Loaded model from disk")
+
+  ber = {}
+  for ep0 in e0:
+    ber_row = []
+
+    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
+      if ep1 == ep0 or ep1 == e0[0]:
+        # if ep1 == 0.1:
+        # print('e0',ep0,'e1',ep1)
+        ber_tmp = 0  # for bit error rate
+        # ser_tmp = 0  # for symbol error rate
+        for t in range(B):
+          idx = rd.randint(0, len(U_k) - 1)
+          u = U_k[idx]  # Bits à envoyer
+          x = C[idx]  # bits encodés
+
+          y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
+          # ser_tmp += bac.NbOfErrors(x, y_bac)
+          start = time.time()
+          u_map_bac = NN_decoder(y_bac, U_k, model_decoder,N) # Detecteur MAP
+          end = time.time()
+          print(end - start)
+          # print('yn', y_bac,'ukt',u_map_bac)
+          ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
+          # print(u,u_map_bac,ber_tmp)
+        ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
+        # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
+        ber_row.append(ber_tmp)
+
+    ber[ep0] = ber_row
+    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+  return ber
+
 
 def mapping(C, X, t, nx):
   codes = []
