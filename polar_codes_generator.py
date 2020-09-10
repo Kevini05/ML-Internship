@@ -9,7 +9,8 @@ def polar_generator_matrix(N=8,k=4,channel_type='AWGN', design_parameter=0.1):
     myPC.construction_type = 'bb'
 
     # mothercode construction
-    Construct(myPC, design_parameter, channel_type)
+    # Construct(myPC, design_parameter, channel_type)
+    Construct(myPC, design_parameter)
     # print('Frozen Bits : ',myPC.frozen,'Reliabilities Bits : ',myPC.reliabilities, "\n")
 
     # # set message
@@ -22,6 +23,7 @@ def polar_generator_matrix(N=8,k=4,channel_type='AWGN', design_parameter=0.1):
     # print("The coded message is:", myPC.u)
 
     T = arikan_gen(int(np.log2(N)))
+    print(myPC.reliabilities)
     infoBits = [myPC.reliabilities[a] for a in range(len(myPC.reliabilities)-1, len(myPC.reliabilities)-k-1, -1)]
     infoBits.sort()
     G = []
