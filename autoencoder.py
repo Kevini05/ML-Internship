@@ -1,146 +1,154 @@
 # Import deep learning library
-from keras.models import Sequential, model_from_json
-from keras.layers.core import Activation, Dense
-from keras.layers import GaussianNoise
-from keras.optimizers import SGD, Adam
-from keras.utils import plot_model
-from keras.models import load_model
+import sys
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
+import keras
+from keras.layers.core import Dense, Lambda
+import keras.backend as K
+import tensorflow as tf
+
+import polar_codes_generator as polar
 import numpy as np
 import matplotlib.pyplot as plt
-import math
-import scipy.special as ss
-import random as rd
 
-#Parameters
-k = 8 #Nombre de bits � envoyer
-N = 16 #codeword length
-G = np.array([[1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-              [1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-              [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-              [1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
-              [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0],
-              [1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0],
-              [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-              [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]) # Matrice g�n�ratrice
-
-def FEC_encoder(b,G):
+def sequence_generator(k):
   """
-  Entr�e : sequence de bits 
-  Sortie : sequence g�n�r�e gr�ce � la matrice g�n�ratrice
-  """ 
-  c = np.dot(np.transpose(G),np.transpose(b))%2
-  return c
-
-def mod_BPSK(b):
-  """
-  Entr�e : sequence de bits 
-  Sortie : Symboles � envoyer
-  """
-  c = [2*b[j]-1 for j in range(len(b))] #Symboles � envoyer
-  return(c)
-
-def dem_BPSK(y):
-  """
-  Entr�e : Symboles re�ues
-  Sortie : s�quence de bits 
-  """
-  d = [(y[j]+1)/2 for j in range(len(y))] #Symboles � envoyer  #sequence de bits
-  return(d)
-
-def BEP(EbN0):
-  """
-  Entr�e : EbN0 value 
-  Sortie : Bit error probability
-  """
-  return 0.5*ss.erfc(math.sqrt(EbN0))
-
-def NbOfErrors(a,b):
-  """
-  Entr�e : 2 bit's arrays
-  Sortie : numero de bit qui ne sont pas �gaux avec un distance de 1e-2
-  """
-  NbErrors = 0
-  for i in range(len(a)):
-    if np.abs(a[i]-b[i])>1e-2:
-      NbErrors += 1
-  return NbErrors
-  
-def codewords_generator(k):
-  """
-  Entr�e : Nombre de bits � envoyer 
+  Entr�e : Nombre de bits � envoyer
   Sortie : all possible codewords
-  """  
+  """
   codewords = np.ones((2**k,k))
   for i in range(2**k):
-     nb = bin(i)[2:].zfill(k)  
+     nb = bin(i)[2:].zfill(k)
      for j in range(k):
         codewords[i][j] = int(nb[j])
   return codewords
 
+def FEC_encoder(k,G):
+  """
+  Entr�e : sequence de bits
+  Sortie : sequence g�n�r�e gr�ce � la matrice g�n�ratrice
+  """
+  c = []
+  messages = sequence_generator(k)
+  for b in messages:
+    c.append(np.dot(np.transpose(G),np.transpose(b))%2)
+  return c
 
-messages = codewords_generator(k)
-cn = [] # The list of inputs of NN
-for i in range(len(messages)):
-  c=FEC_encoder(messages[i],G)
-  cn.append(mod_BPSK(c))
+def BSC_channel(x, epsilon):
+  """ Entrée : Symboles à envoyer
+      Sortie : Symboles reçus, bruités """
+  x = K.round(x)
+  n = K.random_uniform(K.shape(x), minval=0.0, maxval=1.0) < epsilon
+  return tf.math.floormod(tf.add(x, tf.cast(n, tf.float32)), tf.cast(2, tf.float32))  # Signal transmis + Bruit
 
-cn=np.array(cn)
+
+def BAC_channel(x, epsilon0):
+  """ Entrée : Symboles à envoyer
+      Sortie : Symboles bruités + intervale crossover probability"""
+  epsilon1 = np.random.uniform(low=0.0, high=1.0, size=(32, 1))
+  interval = np.eye(4)[[int(x * 4) for x in epsilon1]]
+  interval = tf.cast(interval, tf.float32)
+
+  y = tf.cast(2,tf.float32)
+  n0 = K.random_uniform(K.shape(x),minval=0.0, maxval=1.0) < epsilon0
+  n1 = K.random_uniform(K.shape(x), minval=0.0, maxval=1.0) < epsilon1
+  n = tf.cast(n0,tf.float32)*tf.math.floormod(x+1,y) + tf.cast(n1,tf.float32)*tf.math.floormod(x,y)
+
+  X = tf.math.floormod(tf.add(x,tf.cast(n,tf.float32)),y) # Signal transmis + Bruit
+  return tf.concat([X,interval],1) # Signal transmis + Bruit + Intervale
+
+
+def return_output_shape(input_shape):
+  print('*****************************************************************', input_shape)
+  return input_shape
+
+###### \Python3\python.exe decoder.py BAC 8 4 10
+#Parameters
+
+
+channel = sys.argv[1]
+N = int(sys.argv[2])
+k = int(sys.argv[3])
+
+rep = 100
+train_epsilon = 0.07
+epoch = int(sys.argv[4])
+S = 5
+
 In = np.eye(2**k) # List of outputs of NN
+# print(In)
+In = np.tile(In,(rep,1))
 
-print(len(cn), len(cn[0]))
-print(len(In))
+N = int(sys.argv[2])
+k = int(sys.argv[3])
+G, infoBits = polar.polar_generator_matrix(N,k)
+c = FEC_encoder(k,G)
+print('size C: ',len(c), 'size Cn: ', len(c[0]))
+# print(np.array(c))
+c = np.array(c)
+c = np.tile(c,(rep,1))
+print('size C: ',len(c), 'size Cn: ', len(c[0]))
 
 ########### Neural Network Generator ###################
-
-optimizer = 'adam'           
+optimizer = 'adam'
 loss = 'categorical_crossentropy'                # or 'mse'
 
-# Build our model
-model_meta = Sequential()
-model_decoder = Sequential()
+### Encoder Layers definitions
+inputs_encoder = keras.Input(shape = 2**k)
+x = Dense(units=S*2**(k), activation='relu')(inputs_encoder)
+outputs_encoder = Dense(units=N, activation='sigmoid')(x)
+# outputs_encoder = Lambda(lambda x: K.round(x))(outputs_encoder)
+### Model Build
+model_encoder = keras.Model(inputs=inputs_encoder, outputs=outputs_encoder)
 
-EbN0_dB = 1 #dB
-train_SNR_Es = EbN0_dB + 10*np.log10(k/N)
-Sigma_n = np.sqrt(1/(2*10**(train_SNR_Es/10))) # Noise Standard Deviation
 
-# Declare the layers
-meta_layer = GaussianNoise(Sigma_n)
-layers = [Dense(units=2**(k+1), input_dim=len(G[0]), activation='relu'),
-          Dense(units=2**k, activation='softmax')]
+### Decoder Layers definitions
+if channel == 'BSC':
+  inputs_decoder = keras.Input(shape=N)
+elif channel == 'BAC':
+  inputs_decoder = keras.Input(shape = N+4)
+x = Dense(units=S*2**(k), activation='relu')(inputs_decoder)
+outputs_decoder = Dense(units=2 ** k, activation='softmax')(x)
+### Model Build
+model_decoder = keras.Model(inputs=inputs_decoder, outputs=outputs_decoder)
 
-# Add the layers to the model
-model_decoder.add(layers[0])
-model_decoder.add(layers[1])
+### Meta model Layers definitions
+inputs_meta = keras.Input(shape = 2**k)
+encoded_bits = model_encoder(inputs=inputs_meta)
+if channel == 'BSC':
+  noisy_bits = Lambda(BSC_channel, arguments={'epsilon':train_epsilon}, output_shape=return_output_shape)(encoded_bits)
+elif channel == 'BAC':
+  noisy_bits = Lambda(BAC_channel, arguments={'epsilon0':train_epsilon})(encoded_bits)
+decoded_bits = model_decoder(inputs=noisy_bits)
+meta_model = keras.Model(inputs=inputs_meta, outputs=decoded_bits)
 
+### Model print summary
+model_encoder.summary()
+# model_decoder.summary()
+# meta_model.summary()
+
+### Compile our models
+model_encoder.compile(loss=loss, optimizer=optimizer)
 model_decoder.compile(loss=loss, optimizer=optimizer)
+meta_model.compile(loss=loss, optimizer=optimizer)
 
-model_meta.add(meta_layer)
-model_meta.add(layers[0])
-model_meta.add(layers[1])
-
-# Configure an optimizer used to minimize the loss function
-#adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-
-# Compile our model
-model_meta.compile(loss=loss, optimizer=optimizer)
-
-# Fit the model
-history=model_meta.fit(cn, In, epochs=2**5,verbose=0)
-model_meta.summary()
-model_decoder.summary()
-
+### Fit the model
+history = meta_model.fit(In, In, epochs=epoch,verbose=1, batch_size=32)
+# history = model_encoder.fit(In, c, epochs=epoch,verbose=1, batch_size=32)
 print("The model is ready to be used...")
 
-# # Mount drive folder as disk
-# from google.colab import drive
-# drive.mount("/content/gdrive", force_remount=True)
-#
-# # serialize model to JSON
-# model_json = model_decoder.to_json()
-# with open("model_ducuara_ibarra_rahmat.json", "w") as json_file:
-#      json_file.write(model_json)
-# # serialize weights to HDF5
-# model_decoder.save_weights("weights_ducuara_ibarra_rahmat.h5")
-#
-# print("Saved model to disk")
+### serialize model to JSON
+model_decoder.save(f"./autoencoder/model_decoder_{channel}_rep-{rep}_epsilon-{train_epsilon}_layerSize_{S}_epoch-{epoch}_k_{k}_N-{N}.h5")
+model_encoder.save(f"./autoencoder/model_encoder_{channel}_rep-{rep}_epsilon-{train_epsilon}_layerSize_{S}_epoch-{epoch}_k_{k}_N-{N}.h5")
+
+
+# Summarize history for loss
+plt.semilogy(history.history['loss'])
+plt.title('Loss function w.r.t. Epoch')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train'])
+plt.grid()
+plt.show()
+
