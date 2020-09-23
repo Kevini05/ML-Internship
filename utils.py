@@ -1,4 +1,6 @@
 #!/usr/bin/python
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
@@ -6,7 +8,6 @@ import BACchannel as bac
 import random as rd
 from polarcodes import *
 import time
-
 
 
 def plot_BSC_BAC(title, e0, error_probability,R):
@@ -80,12 +81,31 @@ def cut_off_epsilon(E0,e1,R,channel):
   index = np.argmin(np.abs(np.array(c) - R))
   cut_off = []
   for i in range(len(E0)):
-    cut_off.append(0) if i < index else cut_off.append(1)
+    cut_off.append(0) if i < index else cut_off.append(0.5)
   return cut_off
 
-
-
-
+def NN_encoder(k,N):
+  import keras
+  codebook = []
+  one_hot = np.eye(2 ** k)
+  if N == 8 and k == 4:
+    # model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-100_epsilon-0.07_layerSize_5_epoch-10000_k_4_N-8.h5")
+    model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
+  elif N == 16 and k == 8:
+    model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
+  elif N == 16 and k == 4:
+    model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
+  for X in one_hot:
+    X = np.reshape(X, [1, 2**k])
+    # c = [int(round(x)) for x in model_encoder.predict(X)[0]]
+    c = [int(x) for x in model_encoder.predict(X)[0]]
+    codebook.append(c)
+  aux = []
+  for code in codebook:
+    if code not in aux:
+      aux.append(code)
+  print('+++++++++++++++++++Repeated Codes = ', len(codebook) - len(aux))
+  return codebook
 
 def block_error_probability(N, k, C, e0, e1):
   """
@@ -124,11 +144,6 @@ def block_error_rate(N, k, C, e0, e1):
   U_k = bac.symbols_generator(k)  # all possible messages
   Y_n = bac.symbols_generator(N)  # all possible symbol sequences
 
-  # e0 = np.linspace(0.1, 0.9, 9)
-  # e1 = np.linspace(0.1, 0.5, 5)
-
-  # print("0.00", '|', ["{:.4f}".format(ep1) for ep1 in e1])
-  # print('------------------------------------------------------------------')
   error_probability = {}
   for ep0 in e0:
     row = []
@@ -141,19 +156,13 @@ def block_error_rate(N, k, C, e0, e1):
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
   return error_probability
 
-
 def bit_error_rate(k, C, B, e0, e1, coded = True):
-  # print(np.array(C))
   U_k = bac.symbols_generator(k)  # all possible messages
-  # e0 = np.linspace(0.1, 0.9, 9)
-  # e1 = np.linspace(0.1, 0.5, 5)
-  print(B)
   ber = {}
   for ep0 in e0:
     ber_row = []
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
-        # if ep1 == 0.1:
         ber_tmp = 0  # for bit error rate
         # ser_tmp = 0  # for symbol error rate
         for t in range(B):
@@ -161,14 +170,14 @@ def bit_error_rate(k, C, B, e0, e1, coded = True):
           u = U_k[idx]  # Bits à envoyer
           x = C[idx]  # bits encodés
 
-          y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
-          # ser_tmp += bac.NbOfErrors(x, y_bac)
           start = time.time()
-          u_map_bac = U_k[bac.MAP_BAC(y_bac, k, C, ep0, ep1) ] if coded else bac.MAP_BAC_uncoded(y_bac, ep0, ep1) # Detecteur MAP
+          y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
           end = time.time()
-          print(end - start)
+          # print('MAP', end - start)
+
+          # ser_tmp += bac.NbOfErrors(x, y_bac)
+          u_map_bac = U_k[bac.MAP_BAC(y_bac, k, C, ep0, ep1) ] if coded else bac.MAP_BAC_uncoded(y_bac, ep0, ep1) # Detecteur MAP
           ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
-          # print(u,u_map_bac,ber_tmp)
         ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
         # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
         ber_row.append(ber_tmp)
@@ -177,64 +186,36 @@ def bit_error_rate(k, C, B, e0, e1, coded = True):
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
   return ber
 
-
-def tensorflow_shutup():
-  """
-  Make Tensorflow less verbose
-  """
-  try:
-    # noinspection PyPackageRequirements
-    import os
-    from tensorflow import logging
-    logging.set_verbosity(logging.ERROR)
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-    # Monkey patching deprecation utils to shut it up! Maybe good idea to disable this once after upgrade
-    # noinspection PyUnusedLocal
-    def deprecated(date, instructions, warn_once=True):
-      def deprecated_wrapper(func):
-        return func
-
-      return deprecated_wrapper
-
-    from tensorflow.python.util import deprecation
-    deprecation.deprecated = deprecated
-
-  except ImportError:
-    pass
-
-
-def NN_decoder(y, codes, model,N):
-  yh = np.reshape(np.array(y), [1, N])
-  vector_prob = model.predict(yh)
-  id = np.argmax(vector_prob)
-  return codes[id]
-
-def bit_error_rate_NN(N, k, C, B, e0, e1):
-  print(B)
-  U_k = bac.symbols_generator(k)  # all possible messages
-
-  from keras.models import model_from_json
-  # load json and create model
-  tensorflow_shutup()
-  json_file = open('./model_decoder_bsc.json', 'r')
-  model_decoder_json = json_file.read()
-  json_file.close()
-  model_decoder = model_from_json(model_decoder_json)
+def bit_error_rate_NN(N, k, C, B, e0, e1, channel = 'BSC' ):
+  import keras
   # load weights into new model
-  model_decoder.load_weights("./weights_decoder_bsc.h5")
-  print("Loaded model from disk")
+  if channel == 'BAC':
+    if N == 8 and k == 4:
+      # "model/model_decoder_BAC_rep-100_epsilon-0.07_layerSize_4_epoch-100_k_4_N-8.h5" #best for polar codes
+      model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-1000_epsilon-0.07_layerSize_5_epoch-1000_k_4_N-8.h5")
+    elif N == 16 and k == 8:
+      # "model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16" #best for polar codes
+      model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16.h5")
+  elif channel == 'BSC':
+    if N == 8 and k == 4:
+      model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+    elif N == 16 and k == 4:
+      model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+    elif N == 16 and k == 8:
+      model_decoder = keras.models.load_model("autoencoder/model_decoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
+  print("Loaded model from disk, ready to be used")
 
+  U_k = bac.symbols_generator(k)  # all possible messages
   ber = {}
+  count = 0
   for ep0 in e0:
     ber_row = []
-
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
-        # if ep1 == 0.1:
-        # print('e0',ep0,'e1',ep1)
         ber_tmp = 0  # for bit error rate
         # ser_tmp = 0  # for symbol error rate
+        interval = np.zeros(4)
+        interval[int(ep1*4)] = 1.0
         for t in range(B):
           idx = rd.randint(0, len(U_k) - 1)
           u = U_k[idx]  # Bits à envoyer
@@ -242,19 +223,23 @@ def bit_error_rate_NN(N, k, C, B, e0, e1):
 
           y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
           # ser_tmp += bac.NbOfErrors(x, y_bac)
+
           start = time.time()
-          u_map_bac = NN_decoder(y_bac, U_k, model_decoder,N) # Detecteur MAP
+          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
+          # print(yh)
+          u_map_bac = U_k[np.argmax(model_decoder.predict(yh))]  # Detecteur MAP
           end = time.time()
-          print(end - start)
-          # print('yn', y_bac,'ukt',u_map_bac)
+          # print('NN', end - start)
+
           ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
-          # print(u,u_map_bac,ber_tmp)
         ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
         # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
         ber_row.append(ber_tmp)
 
     ber[ep0] = ber_row
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+    count+= 1
+    print(count/len(e0)*100,'% completed ')
   return ber
 
 
