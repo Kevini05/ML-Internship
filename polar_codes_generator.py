@@ -23,7 +23,7 @@ def polar_generator_matrix(N=8,k=4,channel_type='AWGN', design_parameter=0.1):
     # print("The coded message is:", myPC.u)
 
     T = arikan_gen(int(np.log2(N)))
-    print(myPC.reliabilities)
+    # print(myPC.reliabilities)
     infoBits = [myPC.reliabilities[a] for a in range(len(myPC.reliabilities)-1, len(myPC.reliabilities)-k-1, -1)]
     infoBits.sort()
     G = []

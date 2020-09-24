@@ -84,28 +84,28 @@ def cut_off_epsilon(E0,e1,R,channel):
     cut_off.append(0) if i < index else cut_off.append(0.5)
   return cut_off
 
-def NN_encoder(k,N):
-  import keras
-  codebook = []
-  one_hot = np.eye(2 ** k)
-  if N == 8 and k == 4:
-    # model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-100_epsilon-0.07_layerSize_5_epoch-10000_k_4_N-8.h5")
-    model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-  elif N == 16 and k == 8:
-    model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
-  elif N == 16 and k == 4:
-    model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-  for X in one_hot:
-    X = np.reshape(X, [1, 2**k])
-    # c = [int(round(x)) for x in model_encoder.predict(X)[0]]
-    c = [int(x) for x in model_encoder.predict(X)[0]]
-    codebook.append(c)
-  aux = []
-  for code in codebook:
-    if code not in aux:
-      aux.append(code)
-  print('+++++++++++++++++++Repeated Codes = ', len(codebook) - len(aux))
-  return codebook
+# def NN_encoder(k,N):
+#   import keras
+#   codebook = []
+#   one_hot = np.eye(2 ** k)
+#   if N == 8 and k == 4:
+#     # model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-100_epsilon-0.07_layerSize_5_epoch-10000_k_4_N-8.h5")
+#     model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
+#   elif N == 16 and k == 8:
+#     model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
+#   elif N == 16 and k == 4:
+#     model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
+#   for X in one_hot:
+#     X = np.reshape(X, [1, 2**k])
+#     # c = [int(round(x)) for x in model_encoder.predict(X)[0]]
+#     c = [int(x) for x in model_encoder.predict(X)[0]]
+#     codebook.append(c)
+#   aux = []
+#   for code in codebook:
+#     if code not in aux:
+#       aux.append(code)
+#   print('+++++++++++++++++++Repeated Codes = ', len(codebook) - len(aux))
+#   return codebook
 
 def block_error_probability(N, k, C, e0, e1):
   """
@@ -159,6 +159,7 @@ def block_error_rate(N, k, C, e0, e1):
 def bit_error_rate(k, C, B, e0, e1, coded = True):
   U_k = bac.symbols_generator(k)  # all possible messages
   ber = {}
+  count = 0
   for ep0 in e0:
     ber_row = []
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
@@ -183,64 +184,66 @@ def bit_error_rate(k, C, B, e0, e1, coded = True):
         ber_row.append(ber_tmp)
 
     ber[ep0] = ber_row
+    count += 1
+    print("{:.3f}".format(count / len(e0) * 100), '% completed ')
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
   return ber
 
-def bit_error_rate_NN(N, k, C, B, e0, e1, channel = 'BSC' ):
-  import keras
-  # load weights into new model
-  if channel == 'BAC':
-    if N == 8 and k == 4:
-      # "model/model_decoder_BAC_rep-100_epsilon-0.07_layerSize_4_epoch-100_k_4_N-8.h5" #best for polar codes
-      model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-1000_epsilon-0.07_layerSize_5_epoch-1000_k_4_N-8.h5")
-    elif N == 16 and k == 8:
-      # "model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16" #best for polar codes
-      model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16.h5")
-  elif channel == 'BSC':
-    if N == 8 and k == 4:
-      model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
-    elif N == 16 and k == 4:
-      model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
-    elif N == 16 and k == 8:
-      model_decoder = keras.models.load_model("autoencoder/model_decoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
-  print("Loaded model from disk, ready to be used")
-
-  U_k = bac.symbols_generator(k)  # all possible messages
-  ber = {}
-  count = 0
-  for ep0 in e0:
-    ber_row = []
-    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
-      if ep1 == ep0 or ep1 == e0[0]:
-        ber_tmp = 0  # for bit error rate
-        # ser_tmp = 0  # for symbol error rate
-        interval = np.zeros(4)
-        interval[int(ep1*4)] = 1.0
-        for t in range(B):
-          idx = rd.randint(0, len(U_k) - 1)
-          u = U_k[idx]  # Bits à envoyer
-          x = C[idx]  # bits encodés
-
-          y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
-          # ser_tmp += bac.NbOfErrors(x, y_bac)
-
-          start = time.time()
-          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
-          # print(yh)
-          u_map_bac = U_k[np.argmax(model_decoder.predict(yh))]  # Detecteur MAP
-          end = time.time()
-          # print('NN', end - start)
-
-          ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
-        ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
-        # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
-        ber_row.append(ber_tmp)
-
-    ber[ep0] = ber_row
-    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
-    count+= 1
-    print(count/len(e0)*100,'% completed ')
-  return ber
+# def bit_error_rate_NN(N, k, C, B, e0, e1, channel = 'BSC' ):
+#   import keras
+#   # load weights into new model
+#   if channel == 'BAC':
+#     if N == 8 and k == 4:
+#       # "model/model_decoder_BAC_rep-100_epsilon-0.07_layerSize_4_epoch-100_k_4_N-8.h5" #best for polar codes
+#       model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-1000_epsilon-0.07_layerSize_5_epoch-1000_k_4_N-8.h5")
+#     elif N == 16 and k == 8:
+#       # "model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16" #best for polar codes
+#       model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16.h5")
+#   elif channel == 'BSC':
+#     if N == 8 and k == 4:
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+#     elif N == 16 and k == 4:
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+#     elif N == 16 and k == 8:
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
+#   print("Loaded model from disk, ready to be used")
+#
+#   U_k = bac.symbols_generator(k)  # all possible messages
+#   ber = {}
+#   count = 0
+#   for ep0 in e0:
+#     ber_row = []
+#     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
+#       if ep1 == ep0 or ep1 == e0[0]:
+#         ber_tmp = 0  # for bit error rate
+#         # ser_tmp = 0  # for symbol error rate
+#         interval = np.zeros(4)
+#         interval[int(ep1*4)] = 1.0
+#         for t in range(B):
+#           idx = rd.randint(0, len(U_k) - 1)
+#           u = U_k[idx]  # Bits à envoyer
+#           x = C[idx]  # bits encodés
+#
+#           y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
+#           # ser_tmp += bac.NbOfErrors(x, y_bac)
+#
+#           start = time.time()
+#           yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
+#           # print(yh)
+#           u_nn = U_k[np.argmax(model_decoder.predict(yh))]  # Detecteur NN
+#           end = time.time()
+#           # print('NN', end - start)
+#
+#           ber_tmp += bac.NbOfErrors(u, u_nn)  # Calcul de bit error rate avec NN
+#         ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec NN
+#         # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
+#         ber_row.append(ber_tmp)
+#
+#     ber[ep0] = ber_row
+#     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+#     count+= 1
+#     print(count/len(e0)*100,'% completed ')
+#   return ber
 
 
 def mapping(C, X, t, nx):
