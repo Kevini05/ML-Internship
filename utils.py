@@ -4,18 +4,17 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
-import BACchannel as bac
+import keras
 import random as rd
 from polarcodes import *
 import time
 
-
-def plot_BSC_BAC(title, e0, error_probability,R):
+def plot_BSC_BAC(title, error_probability,R):
   """
   :param title: Figure title
   :param e0: linspace of all epsilon0
-  :param error_probability: error probability dictionary
-  :param design_parameter: linspace with all design parameters
+  :param error_probability: error probability dictionary (BER or BLER)
+  :param R: Coding rate R=k/N
   :return: plot
   """"""
   """
@@ -33,8 +32,10 @@ def plot_BSC_BAC(title, e0, error_probability,R):
     bsc_fer = []
     legends.append(keys)
     # print(keys,error_probability,e0)
-
-    for ep0 in e0:
+    e0_bac = []
+    for ep0 in error_probability[keys]:
+      e0_bac.append(ep0)
+    for ep0 in e0_bac:
       bac_fer.append(error_probability[keys][ep0][0])
       if ep0 <= 0.5:
         bsc_fer.append(error_probability[keys][ep0][-1])
@@ -42,19 +43,19 @@ def plot_BSC_BAC(title, e0, error_probability,R):
     # print('BAC', ["{:.4f}".format(a) for a in bac_fer])
     # print('BSC', ["{:.4f}".format(a) for a in bsc_fer])
 
-    ep0 = [x for x in e0 if x <= 0.5]
+    e0_bsc = [x for x in e0_bac if x <= 0.5]
     m = next(marker)
     l = next(linestyle)
-    ax1.semilogy(e0, [bac_fer[a] for a in range(len(bac_fer))], linestyle=l, marker=m, ms=1, linewidth=0.7)
-    ax2.semilogy(ep0, [bsc_fer[a] for a in range(len(bsc_fer))], linestyle=l, marker=m, ms=1, linewidth=1)
+    ax1.semilogy(e0_bac, [bac_fer[a] for a in range(len(bac_fer))], linestyle=l, marker=m, ms=1, linewidth=1)
+    ax2.semilogy(e0_bsc, [bsc_fer[a] for a in range(len(bsc_fer))], linestyle=l, marker=m, ms=1, linewidth=1)
 
-  E0 = np.linspace(0.0001, 0.9999, 901)
-  ax1.semilogy(E0,cut_off_epsilon(E0, e0[0], R,'BAC'),'k', linestyle='-', ms=0.1, linewidth=0.8)
-  E0 = np.linspace(0.0001, 0.24999, 451)
-  ax2.semilogy(E0, cut_off_epsilon(E0, e0[0], R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.8)
+  E0 = np.linspace(0.0001, 0.99999, 901)
+  ax1.semilogy(E0,cut_off_epsilon(E0, e0_bac[0], R,'BAC'),'k', linestyle='-', ms=0.1, linewidth=0.8)
+  E0 = np.linspace(0.0001, 0.49999, 451)
+  ax2.semilogy(E0, cut_off_epsilon(E0, e0_bac[0], R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.8)
 
   ax1.legend(legends,prop={'size': 5})
-  ax1.set_title(f"BAC($\epsilon_1$={e0[0]},$\epsilon_0$)", fontsize=8)
+  ax1.set_title(f"BAC($\epsilon_1$={e0_bac[0]},$\epsilon_0$)", fontsize=8)
   ax1.set_xlabel('$\epsilon_0$', fontsize=8)
   ax1.set_ylabel('Probabilité d`érreur', fontsize=8)
   ax1.grid()
@@ -84,41 +85,31 @@ def cut_off_epsilon(E0,e1,R,channel):
     cut_off.append(0) if i < index else cut_off.append(0.5)
   return cut_off
 
-# def NN_encoder(k,N):
-#   import keras
-#   codebook = []
-#   one_hot = np.eye(2 ** k)
-#   if N == 8 and k == 4:
-#     # model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-100_epsilon-0.07_layerSize_5_epoch-10000_k_4_N-8.h5")
-#     model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-#   elif N == 16 and k == 8:
-#     model_encoder = keras.models.load_model("autoencoder/model_encoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
-#   elif N == 16 and k == 4:
-#     model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-#   for X in one_hot:
-#     X = np.reshape(X, [1, 2**k])
-#     # c = [int(round(x)) for x in model_encoder.predict(X)[0]]
-#     c = [int(x) for x in model_encoder.predict(X)[0]]
-#     codebook.append(c)
-#   aux = []
-#   for code in codebook:
-#     if code not in aux:
-#       aux.append(code)
-#   print('+++++++++++++++++++Repeated Codes = ', len(codebook) - len(aux))
-#   return codebook
+def NN_encoder(k,N):
+  print('*******************codebook********************************************')
+  one_hot = np.eye(2 ** k)
+  model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
+  print("Encoder Loaded from disk, ready to be used")
+
+  codebook = np.round(model_encoder.predict(one_hot)).astype('int')
+  print(codebook)
+
+  aux = []
+  for code in codebook.tolist():
+    if code not in aux:
+      aux.append(code)
+  print('+++++++++++++++++++ Repeated Codes NN encoder = ', len(codebook) - len(aux))
+  print('dist = ', sum([sum(codeword) for codeword in codebook]) * 1.0 / (N * 2 ** k))
+  print('***************************************************************')
+  return codebook
 
 def block_error_probability(N, k, C, e0, e1):
-  """
-  :param N: coded message size
-  :param k: message size
-  :param C: Codebook
-  :return: error probability for all combinations of e0 and e1
-  """
-  U_k = bac.symbols_generator(k)  # all possible messages
-  Y_n = bac.symbols_generator(N)  # all possible symbol sequences
-
-  # e0 = np.linspace(0.1, 0.9, 9)
-  # e1 = np.linspace(0.1, 0.5, 5)
+  """ :param N: coded message size
+      :param k: message size
+      :param C: Codebook
+      :return: error probability for all combinations of e0 and e1"""
+  U_k = symbols_generator(k)  # all possible messages
+  Y_n = symbols_generator(N)  # all possible symbol sequences
 
   # print("0.00", '|', ["{:.4f}".format(ep1) for ep1 in e1])
   # print('------------------------------------------------------------------')
@@ -127,60 +118,41 @@ def block_error_probability(N, k, C, e0, e1):
     row = []
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
-        # if ep1 == 0.1:
-        a = bac.succes_probability(Y_n, C, U_k, ep0, ep1)
+        a = succes_probability(Y_n, C, U_k, ep0, ep1)
         row.append(1 - a)
     error_probability[ep0] = row
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
   return error_probability
 
-def block_error_rate(N, k, C, e0, e1):
-  """
-  :param N: coded message size
-  :param k: message size
-  :param C: Codebook
-  :return: error probability for all combinations of e0 and e1
-  """
-  U_k = bac.symbols_generator(k)  # all possible messages
-  Y_n = bac.symbols_generator(N)  # all possible symbol sequences
 
-  error_probability = {}
-  for ep0 in e0:
-    row = []
-    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
-      if ep1 == ep0 or ep1 == e0[0]:
-        # if ep1 == 0.1:
-        a = bac.succes_probability(Y_n, C, U_k, ep0, ep1)
-        row.append(1 - a)
-    error_probability[ep0] = row
-    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
-  return error_probability
-
-def bit_error_rate(k, C, B, e0, e1, coded = True):
-  U_k = bac.symbols_generator(k)  # all possible messages
+def bit_error_rate(k, C, N_iter_max, e0, e1, coded = True):
+  N_errors_mini = 100
+  U_k = symbols_generator(k)  # all possible messages
   ber = {}
   count = 0
   for ep0 in e0:
     ber_row = []
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
-      if ep1 == ep0 or ep1 == e0[0]:
+      # if ep1 == ep0 or ep1 == e0[0]:
         ber_tmp = 0  # for bit error rate
-        # ser_tmp = 0  # for symbol error rate
-        for t in range(B):
+
+        N_errors = 0
+        N_iter = 0
+        while N_iter < N_iter_max and N_errors < N_errors_mini:
+          N_iter += 1
+
           idx = rd.randint(0, len(U_k) - 1)
-          u = U_k[idx]  # Bits à envoyer
-          x = C[idx]  # bits encodés
+          u = U_k[idx]  # Bits to be sent
+          x = C[idx]  # coded bits
+          y_bac = BAC_channel(x, ep0, ep1)  # received symbols
 
-          start = time.time()
-          y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
-          end = time.time()
-          # print('MAP', end - start)
+          te = time.time()
+          u_map_bac = U_k[MAP_BAC(y_bac, k, C, ep0, ep1)] if coded else MAP_BAC_uncoded(y_bac, ep0, ep1)  # MAP Detector
+          te = time.time() - te
+          # print(f"A MAP time = {te}s ========================")
 
-          # ser_tmp += bac.NbOfErrors(x, y_bac)
-          u_map_bac = U_k[bac.MAP_BAC(y_bac, k, C, ep0, ep1) ] if coded else bac.MAP_BAC_uncoded(y_bac, ep0, ep1) # Detecteur MAP
-          ber_tmp += bac.NbOfErrors(u, u_map_bac)  # Calcul de bit error rate avec MAP
-        ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec MAP
-        # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
+          N_errors += NbOfErrors(u, u_map_bac)  # bit error rate compute with MAPs
+        ber_tmp = N_errors / (k * 1.0 * N_iter)  # bit error rate compute with MAP
         ber_row.append(ber_tmp)
 
     ber[ep0] = ber_row
@@ -189,62 +161,49 @@ def bit_error_rate(k, C, B, e0, e1, coded = True):
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
   return ber
 
-# def bit_error_rate_NN(N, k, C, B, e0, e1, channel = 'BSC' ):
-#   import keras
-#   # load weights into new model
-#   if channel == 'BAC':
-#     if N == 8 and k == 4:
-#       # "model/model_decoder_BAC_rep-100_epsilon-0.07_layerSize_4_epoch-100_k_4_N-8.h5" #best for polar codes
-#       model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-1000_epsilon-0.07_layerSize_5_epoch-1000_k_4_N-8.h5")
-#     elif N == 16 and k == 8:
-#       # "model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16" #best for polar codes
-#       model_decoder = keras.models.load_model("model/model_decoder_BAC_rep-500_epsilon-0.07_layerSize_5_epoch-100_k_8_N-16.h5")
-#   elif channel == 'BSC':
-#     if N == 8 and k == 4:
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
-#     elif N == 16 and k == 4:
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
-#     elif N == 16 and k == 8:
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder_BSC_rep-1000_epsilon-0.07_layerSize_4_epoch-100_k_8_N-16.h5")
-#   print("Loaded model from disk, ready to be used")
-#
-#   U_k = bac.symbols_generator(k)  # all possible messages
-#   ber = {}
-#   count = 0
-#   for ep0 in e0:
-#     ber_row = []
-#     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
-#       if ep1 == ep0 or ep1 == e0[0]:
-#         ber_tmp = 0  # for bit error rate
-#         # ser_tmp = 0  # for symbol error rate
-#         interval = np.zeros(4)
-#         interval[int(ep1*4)] = 1.0
-#         for t in range(B):
-#           idx = rd.randint(0, len(U_k) - 1)
-#           u = U_k[idx]  # Bits à envoyer
-#           x = C[idx]  # bits encodés
-#
-#           y_bac = bac.BAC_channel(x, ep0, ep1)  # symboles reçus
-#           # ser_tmp += bac.NbOfErrors(x, y_bac)
-#
-#           start = time.time()
-#           yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
-#           # print(yh)
-#           u_nn = U_k[np.argmax(model_decoder.predict(yh))]  # Detecteur NN
-#           end = time.time()
-#           # print('NN', end - start)
-#
-#           ber_tmp += bac.NbOfErrors(u, u_nn)  # Calcul de bit error rate avec NN
-#         ber_tmp = ber_tmp / (k * 1.0 * B)  # Calcul de bit error rate avec NN
-#         # ser_tmp = ser_tmp / (N * 1.0 * B)  # Calcul de symbol error rate avec MAP
-#         ber_row.append(ber_tmp)
-#
-#     ber[ep0] = ber_row
-#     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
-#     count+= 1
-#     print(count/len(e0)*100,'% completed ')
-#   return ber
+def bit_error_rate_NN(N, k, C, N_iter_max, e0, e1, channel = 'BSC' ):
+  print('*******************NN-Decoder********************************************')
+  model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+  # model_decoder = keras.models.load_model("./model/model_decoder_16_4_std.h5")
+  print("Decoder Loaded from disk, ready to be used")
+  N_errors_mini = 100
+  U_k = symbols_generator(k)  # all possible messages
+  ber = {}
+  count = 0
+  for ep0 in e0:
+    ber_row = []
+    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
+      if ep1 == ep0 or ep1 == e0[0]:
+        ber_tmp = 0  # for bit error rate
+        interval = np.zeros(4)
+        interval[int(ep1*4)] = 1.0
 
+        N_errors = 0
+        N_iter = 0
+        while N_iter < N_iter_max:
+          N_iter += 1
+
+          idx = rd.randint(0, len(U_k) - 1)
+          u = U_k[idx]  # Bits to be sent
+          x = C[idx]  # coded bits
+          y_bac = BAC_channel(x, ep0, ep1)  # received symbols
+
+          start = time.time()
+          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
+          # print(yh)
+          u_nn = U_k[np.argmax(model_decoder(yh))]  #  NN Detector
+          end = time.time()
+          # print('NN', end - start)
+
+          N_errors += NbOfErrors(u, u_nn)  # bit error rate compute with NN
+        ber_tmp = N_errors / (k * 1.0 * N_iter)  # bit error rate compute with NN
+        ber_row.append(ber_tmp)
+
+    ber[ep0] = ber_row
+    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+    count+= 1
+    print("{:.3f}".format(count / len(e0) * 100), '% completed ')
+  return ber
 
 def mapping(C, X, t, nx):
   codes = []
@@ -266,33 +225,6 @@ def mapping(C, X, t, nx):
       if code in aux:
         a+=1
     print('++++++++++++++++++Repeated Codes = ', a)
-    return codes
-  else:
-    raise IOError('ERROR t is not multiple of big N')
-
-def mapping3(C, X, t, nx):
-  codes = []
-  count = 0
-  if len(C[1]) % t == 0:
-    for c in C:
-      # print(c)
-      row = []
-      for i in range(0, len(c), t):
-        # print(c[i:i + t])
-        s =sum(c[i:i + t])
-        # print(s)
-        row.append(0) if s <= t*nx else row.append(1)
-      count += sum(row)
-      codes.append(row)
-    print(f"dist = {count * 1.00 / (len(row) * len(codes)):.3f} after mapping")
-    aux = []
-    for code in codes:
-      if code in aux:
-        # print('****repeated code******')
-        a=1
-      else:
-        aux.append(code)
-    print('+++++++++++++++++++++Repeated Codes = ', len(C) - len(aux))
     return codes
   else:
     raise IOError('ERROR t is not multiple of big N')
@@ -329,10 +261,34 @@ def mapping2(C, X, t, nx):
   else:
     raise IOError('ERROR t is not multiple of big N')
 
+def mapping3(C, X, t, nx):
+  codes = []
+  count = 0
+  if len(C[1]) % t == 0:
+    for c in C:
+      # print(c)
+      row = []
+      for i in range(0, len(c), t):
+        # print(c[i:i + t])
+        s =sum(c[i:i + t])
+        # print(s)
+        row.append(0) if s <= t*nx else row.append(1)
+      count += sum(row)
+      codes.append(row)
+    print(f"dist = {count * 1.00 / (len(row) * len(codes)):.3f} after mapping")
+    aux = []
+    for code in codes:
+      if code in aux:
+        # print('****repeated code******')
+        a=1
+      else:
+        aux.append(code)
+    print('+++++++++++++++++++++Repeated Codes = ', len(C) - len(aux))
+    return codes
+  else:
+    raise IOError('ERROR t is not multiple of big N')
 
 def integrated_function(infoBits, msm, k, N, threshold):
-  # print(infoBits)
-  # threshold = 20
   T = np.transpose(arikan_gen(int(np.log2(N))))
   V = []
   for i in range(len(msm)):
@@ -350,10 +306,7 @@ def integrated_function(infoBits, msm, k, N, threshold):
         # row.append(1)
         count_frozen += 1
     V.append(row)
-
-  codebook = bac.matrix_codes2(V, k, T, N)
-  # print(np.array(codebook))
-
+  codebook = matrix_codes2(V, k, T, N)
   # Validation of codewords
   aux = []
   for code in codebook:
@@ -361,5 +314,137 @@ def integrated_function(infoBits, msm, k, N, threshold):
       print('****repeated codeword Integrated Scheme******')
     else:
       aux.append(code)
-
   return codebook
+
+################################## BAC Functions #####################################################
+
+def linspace(a, b, n=100):
+  """ :param a: start point
+      :param b: stop point
+      :param n: number of points
+      :return: linspace """
+  if n < 2:
+      return b
+  diff = (float(b) - a)/(n - 1)
+  return [diff * i + a  for i in range(n)]
+
+def MAP_BAC(symbols,k,codes,e0,e1):
+  """ :param symbols: Received Symbols
+      :param k: message size
+      :param codes: codebook (all codewords of N-length)
+      :param e0 et e1: Crossover probabilities
+      :return: index of decoded message among every possible messages """
+  g = [0 for i in range(2**k)]
+  for j in range(2**k):
+    d11 = 0
+    d01 = 0
+    d10 = 0
+    for i in range(len(symbols)):
+      d11 += int(codes[j][i]) & int(symbols[i])
+      d01 += ~int(codes[j][i]) & int(symbols[i])
+      d10 += int(codes[j][i]) & ~int(symbols[i])
+    g[j] = (e0/(1-e0))**d01*(e1/(1-e0))**d10*((1-e1)/(1-e0))**d11
+  return g.index(max(g))
+
+def MAP_BAC_uncoded(code,e0,e1):
+  """ :param codes: codebook (all codewords of N-length)
+      :param e0 et e1: Crossover probabilities
+      :return: index of decoded message among every possible messages """
+  if e1+e0==1.0 or e1==0.0 or e0==0:
+    y = 0.5
+  else:
+    y = np.log(e1 / (1 - e0)) / (np.log((e1 * e0) / ((1 - e0) * (1 - e1))))
+  decoded_message = []
+  for u in code:
+    decoded_message.append(1) if u > y else decoded_message.append(0)
+  return decoded_message
+
+def symbols_generator(N):
+  """ :param N: symbols size (number of bits)
+      :return: all possible bit combinations of length N """
+  messages = []
+  for i in range(2**N):
+     messages.append([0 for a in range(N)])
+     nb = bin(i)[2:].zfill(N)
+     for j in range(N):
+        messages[i][j] = int(nb[j])
+  return messages
+
+def succes_probability(symbols,codes,msm,e0,e1):
+  """ :param symbols: recei
+      :param
+      :param e0 et e1: Crossover probabilities
+      :return: succes probabilities  """
+  Pc = 0
+  for y in symbols:
+    # print('y',y,'g(y)')
+    id = MAP_BAC(y,len(msm[1]),codes,e0,e1)
+    u = msm[id]
+    d11 = 0
+    d01 = 0
+    d10 = 0
+    for i in range(len(y)):
+      d11 += int(codes[id][i]) & int(y[i])
+      d01 += ~int(codes[id][i]) & int(y[i])
+      d10 += int(codes[id][i]) & ~int(y[i])
+
+    Pc += (e0/(1-e0))**d01*(e1/(1-e0))**d10*((1-e1)/(1-e0))**d11
+    # print('u',u,'f(u)',codes[id])
+  return (1-e0)**len(y)/(2**len(u))*Pc
+
+def matrix_codes(msm, k, G, N):
+  codes = []
+  g = []
+  for i in range(N):
+    g.append([G[j][i] for j in range(k)])
+  # print('G',G,'g',g)
+  for a in range(2**k):
+    row = [sum([i * j for (i, j) in zip(g[b], msm[a])])%2 for b in range(N)]
+    codes.append(row)
+  print('dist = ', sum([sum(codes[h]) for h in range(len(codes))])*1.0/(N*2**k))
+  return codes
+
+def matrix_codes2(msm, k, G, N):
+  codes = []
+  g = []
+  for i in range(N):
+    g.append([G[j][i] for j in range(N)])
+  # print('G',G,'g',g)
+  for a in range(2**k):
+    row = [sum([i * j for (i, j) in zip(g[b], msm[a])])%2 for b in range(N)]
+    codes.append(row)
+  print('dist = ', sum([sum(codes[h]) for h in range(len(codes))])*1.000/(N*2**k))
+  return codes
+
+def optimal_distribution(e0,e1):
+	if e0+e1<1:
+		he0	= -e0*np.math.log(e0,2)-(1-e0)*np.math.log(1-e0,2)
+		he1 = -e1*np.math.log(e1,2)-(1-e1)*np.math.log(1-e1,2)
+		z = 2.0**((he0-he1)/(1.0-e0-e1))
+		q = (z-e0*(1+z))/((1+z)*(1-e0-e1))
+	else:
+		q = 0.5
+	return q
+
+def FEC_encoder(b, G):
+  """ :param b: bit sequence and Generator Matrix
+      :return: sequence générée grâce à la matrice génératrice """
+  return np.dot(np.transpose(G), np.transpose(b)) % 2
+
+def BAC_channel(x, epsilon0, epsilon1):
+  """ input : Symbols to be sent
+      :return: Symboles reçus, bruités """
+  n = [0] * len(x)
+  # print('e0 ',epsilon0)
+  # print('e1 ',epsilon1)
+  for i in range(len(x)):
+    rdnm = rd.randint(0, 1000) / (1000.0)
+    n[i] = x[i] ^ 1 if (rdnm <= epsilon0 and x[i] == 0) or (rdnm <= epsilon1 and x[i] == 1) else x[i]
+  return n  # Signal transmis + Bruit
+
+def NbOfErrors(a, b):
+  """ :param a,b: 2 bit's arrays
+      :return: number of bits that are not equals (maximal distance 1e-2)"""
+  # print('sent',a,'rec',b,'dif',np.sum(1.0*(a != b)))
+  return np.sum(np.abs(np.array(a) - np.array(b)))
+  # return np.sum(1.0*(a != b))  para el BLER

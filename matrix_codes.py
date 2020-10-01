@@ -78,8 +78,7 @@ def matrix_codes(N, k, type):
         G = [[1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1],
              [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1],
              [0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0],
-             [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
-              0]]  # This code has been created as a R = ReedMuller(16,5) and then shorted using ShotenCode(R,15) in MAGMA
+             [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]]  # This code has been created as a R = ReedMuller(16,5) and then shorted using ShotenCode(R,15) in MAGMA
       if k == 8:
         G = [[1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0],
              [0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1],

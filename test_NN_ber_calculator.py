@@ -40,12 +40,12 @@
 #   elif channel == 'autoencoder':
 #     print("autoencoder-decoder")
 #     if N == 8 and k == 4:
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder_16_4_std.h5")
 #     elif N == 16 and k == 4:
 #       # model_decoder = keras.models.load_model("autoencoder/model_decoder_BAC_rep-100_epsilon-0.07_layerSize_5_epoch-300_k_4_N-16.h5")
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder_16_4_std.h5")
 #     elif N == 16 and k == 8:
-#       model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+#       model_decoder = keras.models.load_model("autoencoder/model_decoder_16_4_std.h5")
 #   print("Decoder Loaded model from disk, ready to be used")
 #
 #   U_k = bac.symbols_generator(k)  # all possible messages
