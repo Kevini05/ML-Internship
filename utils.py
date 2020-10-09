@@ -5,7 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 import keras
-import random as rd
+from mish import Mish as mish
+# import random as rd
 from polarcodes import *
 import time
 
@@ -52,18 +53,20 @@ def plot_BSC_BAC(title, error_probability,R):
   E0 = np.linspace(0.0001, 0.99999, 901)
   ax1.semilogy(E0,cut_off_epsilon(E0, e0_bac[0], R,'BAC'),'k', linestyle='-', ms=0.1, linewidth=0.8)
   E0 = np.linspace(0.0001, 0.49999, 451)
-  ax2.semilogy(E0, cut_off_epsilon(E0, e0_bac[0], R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.8)
+  ax2.semilogy(E0, cut_off_epsilon(E0, 0, R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.8)
 
   ax1.legend(legends,prop={'size': 5})
   ax1.set_title(f"BAC($\epsilon_1$={e0_bac[0]},$\epsilon_0$)", fontsize=8)
   ax1.set_xlabel('$\epsilon_0$', fontsize=8)
   ax1.set_ylabel('Probabilité d`érreur', fontsize=8)
-  ax1.grid()
+  ax1.set_xticks(np.arange(0, 1, step=0.2))
+  # ax1.set_xticklabels(np.arange(0, 1, step=0.2))
+  ax1.grid(which='both', linewidth=0.2)
 
   ax2.legend(legends,prop={'size': 5})
   ax2.set_title('BSC($\epsilon$)', fontsize=8)
   ax2.set_xlabel('$\epsilon$', fontsize=8)
-  ax2.grid()
+  ax2.grid(which='both', linewidth=0.2)
 
   plt.show()
 
@@ -92,15 +95,8 @@ def NN_encoder(k,N):
   print("Encoder Loaded from disk, ready to be used")
 
   codebook = np.round(model_encoder.predict(one_hot)).astype('int')
-  print(codebook)
+  # print(codebook)
 
-  aux = []
-  for code in codebook.tolist():
-    if code not in aux:
-      aux.append(code)
-  print('+++++++++++++++++++ Repeated Codes NN encoder = ', len(codebook) - len(aux))
-  print('dist = ', sum([sum(codeword) for codeword in codebook]) * 1.0 / (N * 2 ** k))
-  print('***************************************************************')
   return codebook
 
 def block_error_probability(N, k, C, e0, e1):
@@ -138,10 +134,10 @@ def bit_error_rate(k, C, N_iter_max, e0, e1, coded = True):
 
         N_errors = 0
         N_iter = 0
-        while N_iter < N_iter_max and N_errors < N_errors_mini:
+        while N_iter < N_iter_max:
           N_iter += 1
 
-          idx = rd.randint(0, len(U_k) - 1)
+          idx = np.random.randint(0, len(U_k) - 1)
           u = U_k[idx]  # Bits to be sent
           x = C[idx]  # coded bits
           y_bac = BAC_channel(x, ep0, ep1)  # received symbols
@@ -172,35 +168,29 @@ def bit_error_rate_NN(N, k, C, N_iter_max, e0, e1, channel = 'BSC' ):
   count = 0
   for ep0 in e0:
     ber_row = []
+    interval = np.zeros(4)
+    interval[int(ep0*4) if ep0 >=0.1 else 0] = 1.0
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
-        ber_tmp = 0  # for bit error rate
-        interval = np.zeros(4)
-        interval[int(ep1*4)] = 1.0
-
         N_errors = 0
         N_iter = 0
-        while N_iter < N_iter_max:
+        while N_iter < N_iter_max:# and N_errors < N_errors_mini:
           N_iter += 1
 
-          idx = rd.randint(0, len(U_k) - 1)
+          idx = np.random.randint(0, len(U_k) - 1)
           u = U_k[idx]  # Bits to be sent
           x = C[idx]  # coded bits
           y_bac = BAC_channel(x, ep0, ep1)  # received symbols
 
-          start = time.time()
-          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N])
-          # print(yh)
+          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) # if channel == 'BAC'  else np.reshape(y_bac, [1, N]).astype(np.float64)
           u_nn = U_k[np.argmax(model_decoder(yh))]  #  NN Detector
-          end = time.time()
-          # print('NN', end - start)
 
           N_errors += NbOfErrors(u, u_nn)  # bit error rate compute with NN
         ber_tmp = N_errors / (k * 1.0 * N_iter)  # bit error rate compute with NN
         ber_row.append(ber_tmp)
 
     ber[ep0] = ber_row
-    # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+    print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
     count+= 1
     print("{:.3f}".format(count / len(e0) * 100), '% completed ')
   return ber
@@ -233,7 +223,7 @@ def mapping2(C, X, t, nx):
   codes = []
   count = 0
   idx_list = list(range(len(C[1])))
-  rd.shuffle(idx_list)
+  np.random.shuffle(idx_list)
   # idx_list = [27, 25, 7, 34, 40, 43, 50, 9, 6, 30, 24, 39, 4, 49, 1, 17, 10, 5, 58, 12, 23, 33, 36, 20, 2, 29, 15, 48, 3, 60, 11, 53, 59, 51, 8, 47, 37, 54, 61, 56, 35, 14, 0, 38, 21, 22, 44, 46, 31, 55, 13, 32, 26, 57, 62, 28, 18, 63, 19, 42, 45, 52, 16, 41]
   print(idx_list)
   if len(C[1]) % t == 0:
@@ -295,7 +285,7 @@ def integrated_function(infoBits, msm, k, N, threshold):
     row = []
     count = 0
     count_frozen = 0
-    frozen = [(1 if rd.randint(0, 100) > threshold else 0) for x in range(N - k)]
+    frozen = [(1 if np.random.randint(0, 100) > threshold else 0) for x in range(N - k)]
     # print(frozen)
     for a in range(N):
       if a in infoBits:
@@ -434,13 +424,13 @@ def FEC_encoder(b, G):
 def BAC_channel(x, epsilon0, epsilon1):
   """ input : Symbols to be sent
       :return: Symboles reçus, bruités """
-  n = [0] * len(x)
   # print('e0 ',epsilon0)
   # print('e1 ',epsilon1)
-  for i in range(len(x)):
-    rdnm = rd.randint(0, 1000) / (1000.0)
-    n[i] = x[i] ^ 1 if (rdnm <= epsilon0 and x[i] == 0) or (rdnm <= epsilon1 and x[i] == 1) else x[i]
-  return n  # Signal transmis + Bruit
+  x = np.array(x)
+  n0 = np.array([int(b0<epsilon0) for b0 in np.random.uniform(0.0, 1.0, len(x))])
+  n1 = np.array([int(b1<epsilon1) for b1 in np.random.uniform(0.0, 1.0, len(x))])
+  n = n0*(x+1)+n1*x
+  return np.mod(n+x,2) # Signal transmis + Bruit
 
 def NbOfErrors(a, b):
   """ :param a,b: 2 bit's arrays

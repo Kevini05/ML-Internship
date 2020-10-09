@@ -10,70 +10,33 @@ import tensorflow as tf
 import keras
 import time
 
-def bler_metric(u_k,u_hat_k):
-  return K.mean(K.mean(K.not_equal(u_k,u_hat_k),1))
+# def BAC_channel(x, epsilon0, epsilon1):
+#   """ input : Symbols to be sent
+#       :return: Symboles reçus, bruités """
+#   # print('e0 ',epsilon0)
+#   # print('e1 ',epsilon1)
+#   x = np.array(x)
+#   n0 = np.array([int(b0<epsilon0) for b0 in np.random.uniform(0.0, 1.0, len(x))])
+#   n1 = np.array([int(b1<epsilon1) for b1 in np.random.uniform(0.0, 1.0, len(x))])
+#   n = n0*(x+1)+n1*x
+#   return np.mod(n+x,2) # Signal transmis + Bruit
+#
+#
+# x = [0,1]*5
+# # x = [0]*10
+# # x = [1]*10
+# y = BAC_channel(x,1,1)
+# print(y)
 
-## Debugginf for noise BSC layer
-with tf.compat.v1.Session() as sess:
-  x = tf.constant([[0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.],[1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.]])
-  y = tf.constant([[1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.],[1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.,1.,0.]])
+shape = 1.5
+scale = 0.1
+# epsilon = np.random.gamma(1.5, 0.1, 100000)
+# epsilon = np.random.chisquare(4, 100000) * 0.01
+# epsilon = np.random.exponential(0.05, 100000)
+epsilon = np.random.lognormal(mean=-2.5,sigma=0.4, size=100000)
+# epsilon = np.random.uniform(low=0.0, high=0.07, size=100000)
 
-  y_test = bler_metric(x,y)
-  aux = y_test.eval()
-  print(aux)
-  # print(tf.rank(aux))
-
-# # load weights into new model
-# model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-# model_decoder = keras.models.load_model("autoencoder/model_decoder_16_4_std.h5")
-# print("Loaded model from disk")
-#
-# codebook = []
-# k = 4
-# N = 8
-# one_hot = np.eye(2**k)
-# for X in one_hot:
-#   X = np.reshape(X,[1,2**k])
-#
-#   c = [np.round(x) for x in model_encoder.predict(X)[0]]
-#   codebook.append(c)
-#
-#   c = np.reshape(c,[1,N])
-#   U_t = model_decoder.predict(c)
-#   print('Coded',np.argmax(X),'c', c, 'Decoded',np.argmax(U_t))
-#   print()
-# aux = []
-# for code in codebook:
-#   if code in aux:
-#     # print('****repeated code******')
-#     a=1
-#   else:
-#     aux.append(code)
-# print('+++++++++++++++++++Repeated Codes = ',len(codebook)-len(aux))
-
-# # load weights into new model
-# model_encoder = keras.models.load_model("autoencoder/model_encoder.h5")
-# print("Loaded model from disk")
-#
-# codebook = []
-# k = 4
-# N = 16
-# one_hot = np.eye(2**k)
-# for X in one_hot:
-#   X = np.reshape(X,[1,2**k])
-#   # print('X',X)
-#
-#   c = [round(x) for x in model_encoder.predict(X)[0]]
-#   codebook.append(c)
-#   # print('c',c)
-#   c = np.reshape(c,[1,N])
-# print(np.array(codebook))
-#
-# aux = []
-# for code in codebook:
-#   if code in aux:
-#     # print('****repeated code******')
-#     a=1
-#   else:
-#     aux.append(code)
-# print('+++++++++++++++++++Repeated Codes = ',len(codebook)-len(aux))
+s = [(int(3*np.log10(s)+4) if s >=0.1 and s<1.0 else 0) for s in epsilon]
+plt.hist(s, 100)
+plt.hist(epsilon, 100)
+plt.show()

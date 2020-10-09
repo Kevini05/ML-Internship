@@ -48,7 +48,7 @@ def BAC_noise(x, epsilon0,batch_size):
 
   epsilon1_train_max = 0.25
 
-  mini_batch = 16
+  mini_batch = 1
   noise_size = int(batch_size / mini_batch)
   epsilon1 = np.random.uniform(low=0.0, high=epsilon1_train_max, size=(noise_size, 1))
   epsilon1 = np.reshape(np.repeat(epsilon1, mini_batch), (batch_size, 1))
@@ -105,9 +105,9 @@ if k == 8 and N == 16:
 k = len(G)      #Nombre de bits � envoyer
 N = len(G[1])   #codeword length
 
-rep = 1000
+rep = 500
 train_epsilon = 0.07
-S = 5
+S = 3
 
 ################### Coding
 U_k = utils.symbols_generator(k)  # all possible messages
