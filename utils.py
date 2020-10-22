@@ -46,29 +46,28 @@ def plot_BSC_BAC(title, error_probability,R):
 
     e0_bsc = [x for x in e0_bac if x <= 0.5]
     m = next(marker)
-    l = next(linestyle)
-    ax1.semilogy(e0_bac, [bac_fer[a] for a in range(len(bac_fer))], linestyle=l, marker=m, ms=1, linewidth=1)
-    ax2.semilogy(e0_bsc, [bsc_fer[a] for a in range(len(bsc_fer))], linestyle=l, marker=m, ms=1, linewidth=1)
+    # l = next(linestyle)
+    l='-'
+    ax1.semilogy(e0_bac, [bac_fer[a] for a in range(len(bac_fer))], linestyle=l, marker=m, ms=0.5, linewidth=0.5)
+    ax2.semilogy(e0_bsc, [bsc_fer[a] for a in range(len(bsc_fer))], linestyle=l, marker=m, ms=0.5, linewidth=0.5)
 
   E0 = np.linspace(0.0001, 0.99999, 901)
-  ax1.semilogy(E0,cut_off_epsilon(E0, e0_bac[0], R,'BAC'),'k', linestyle='-', ms=0.1, linewidth=0.8)
+  ax1.semilogy(E0,cut_off_epsilon(E0, e0_bac[0], R,'BAC'),'k', linestyle='-', ms=0.1, linewidth=0.15)
   E0 = np.linspace(0.0001, 0.49999, 451)
-  ax2.semilogy(E0, cut_off_epsilon(E0, 0, R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.8)
+  ax2.semilogy(E0, cut_off_epsilon(E0, 0, R, 'BSC'), 'k', linestyle='-', ms=0.1, linewidth=0.15)
 
-  ax1.legend(legends,prop={'size': 5})
+  ax1.legend(legends,prop={'size': 5},loc="lower right")
   ax1.set_title(f"BAC($\epsilon_1$={e0_bac[0]},$\epsilon_0$)", fontsize=8)
   ax1.set_xlabel('$\epsilon_0$', fontsize=8)
-  ax1.set_ylabel('Probabilité d`érreur', fontsize=8)
-  ax1.set_xticks(np.arange(0, 1, step=0.2))
+  ax1.set_ylabel('Error Probability', fontsize=8)
   # ax1.set_xticklabels(np.arange(0, 1, step=0.2))
   ax1.grid(which='both', linewidth=0.2)
 
-  ax2.legend(legends,prop={'size': 5})
+  ax2.legend(legends,prop={'size': 5},loc="lower right")
   ax2.set_title('BSC($\epsilon$)', fontsize=8)
   ax2.set_xlabel('$\epsilon$', fontsize=8)
   ax2.grid(which='both', linewidth=0.2)
 
-  plt.show()
 
 def h2(x):
   return -(1-x)*np.log2(1-x)-x*np.log2(x)
@@ -120,7 +119,6 @@ def block_error_probability(N, k, C, e0, e1):
     # print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in row])
   return error_probability
 
-
 def bit_error_rate(k, C, N_iter_max, e0, e1, coded = True):
   N_errors_mini = 100
   U_k = symbols_generator(k)  # all possible messages
@@ -162,14 +160,13 @@ def bit_error_rate_NN(N, k, C, N_iter_max, e0, e1, channel = 'BSC' ):
   model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
   # model_decoder = keras.models.load_model("./model/model_decoder_16_4_std.h5")
   print("Decoder Loaded from disk, ready to be used")
-  N_errors_mini = 100
   U_k = symbols_generator(k)  # all possible messages
   ber = {}
   count = 0
   for ep0 in e0:
     ber_row = []
     interval = np.zeros(4)
-    interval[int(ep0*4) if ep0 >=0.1 else 0] = 1.0
+    interval[int(ep0*4) if ep0 < 0.25 else 3] = 1.0
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
         N_errors = 0
@@ -182,7 +179,7 @@ def bit_error_rate_NN(N, k, C, N_iter_max, e0, e1, channel = 'BSC' ):
           x = C[idx]  # coded bits
           y_bac = BAC_channel(x, ep0, ep1)  # received symbols
 
-          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) # if channel == 'BAC'  else np.reshape(y_bac, [1, N]).astype(np.float64)
+          yh = np.reshape(np.concatenate((y_bac,interval),axis=0), [1, N+4]) if channel == 'BAC'  else np.reshape(y_bac, [1, N]).astype(np.float64)
           u_nn = U_k[np.argmax(model_decoder(yh))]  #  NN Detector
 
           N_errors += NbOfErrors(u, u_nn)  # bit error rate compute with NN
@@ -192,8 +189,60 @@ def bit_error_rate_NN(N, k, C, N_iter_max, e0, e1, channel = 'BSC' ):
     ber[ep0] = ber_row
     print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
     count+= 1
-    print("{:.3f}".format(count / len(e0) * 100), '% completed ')
+    print("{:.3f}".format(count/len(e0)*100), '% completed ')
   return ber
+
+def bit_error_rate_NN_predict(N, k, C, Nb_sequences, e0, e1, inter=False):
+  print('*******************NN-Decoder********************************************')
+  model_decoder = keras.models.load_model("autoencoder/model_decoder.h5")
+  # model_decoder = keras.models.load_model("./model/model_decoder_16_4_std.h5")
+  print("Decoder Loaded from disk, ready to be used")
+  U_k = symbols_generator(k)  # all possible messages
+  ber = {}
+  bler = {}
+  count = 0
+  Nb_iter_max = 10
+  Nb_words = int(Nb_sequences/Nb_iter_max)
+
+  for ep0 in e0:
+    ber_row = []
+    bler_row = []
+    interval = np.zeros(4)
+    interval[int(ep0*4) if ep0 < 0.25 else 3] = 1.0
+    for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
+      if ep1 == ep0 or ep1 == e0[0]:
+        N_errors = 0
+        N_errors_bler = 0
+        N_iter = 0
+        while N_iter < Nb_iter_max:# and N_errors < N_errors_mini:
+          N_iter += 1
+
+          idx = np.random.randint(0, len(U_k) - 1, size=(1, Nb_words)).tolist()[0]
+          u = [U_k[a] for a in idx]
+          x = [C[a] for a in idx]  # coded bits
+          if inter:
+            y_bac = [np.concatenate((BAC_channel(xi, ep0, ep1), interval), axis=0) for xi in x]  # received symbols
+            dec_input_size = N+4
+          else:
+            y_bac = [BAC_channel(xi, ep0, ep1)  for xi in x]# received symbols
+            dec_input_size = N
+
+          yh = np.reshape(y_bac, [Nb_words, dec_input_size]).astype(np.float64)
+          u_nn = [U_k[idy] for idy in np.argmax(model_decoder.predict(yh),1) ]  #  NN Detector
+
+          for i in range(len(u)):
+            N_errors += np.sum(np.abs(np.array(u[i]) - np.array(u_nn[i])))  # bit error rate compute with NN
+            N_errors_bler += np.sum(1.0*(u[i] != u_nn[i]))
+        ber_row.append(N_errors / (k * 1.0 * Nb_sequences)) # bit error rate compute with NN
+        bler_row.append(N_errors_bler / (1.0 * Nb_sequences)) # block error rate compute with NN
+
+    ber[ep0] = ber_row
+    bler[ep0] = bler_row
+    print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in ber_row])
+    print("{:.2f}".format(ep0), '|', ["{:.4f}".format(a) for a in bler_row])
+    count+= 1
+    print("{:.3f}".format(count/len(e0)*100), '% completed ')
+  return ber,bler
 
 def mapping(C, X, t, nx):
   codes = []
