@@ -5,8 +5,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
 import keras
 from keras.layers.core import Dense, Lambda, Dropout
-
-from keras.layers import Conv1D, MaxPooling1D, Flatten, Input, UpSampling1D, Reshape, AveragePooling1D
 from keras.layers import LeakyReLU
 from keras.layers.normalization import BatchNormalization
 import keras.backend as K
@@ -66,16 +64,20 @@ N = int(sys.argv[2])
 k = int(sys.argv[3])
 epoch = int(sys.argv[4])
 
-rep = 500
-train_epsilon = 0.02
+rep = 80
+train_epsilon = 0.3
 S = 3
 rounding = True
 MAP_test = False
 
 In = np.eye(2**k) # List of outputs of NN
 In = np.tile(In,(rep,1))
+u_k = utils.symbols_generator(k)
+# print(u_k)
+U_k = np.tile(u_k,(rep,1))
+# print(U_k)
 # print(In)
-batch_size = int(len(In)/1)
+batch_size = 256
 ####################################################################################################
 ########### Neural Network Generator ###################
 # LearningRate = 0.001
@@ -88,9 +90,9 @@ optimizer = 'adam'
 # optimizer = keras.optimizers.SGD(lr=0.03, nesterov=True)
 # optimizer = keras.optimizers.Adagrad(learning_rate=0.01)
 
-# optimizer = keras.optimizers.Nadam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.001)
+optimizer = keras.optimizers.Nadam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.001)
 
-loss = 'categorical_crossentropy' #'categorical_crossentropy'  #'kl_divergence'          # 'mse'
+loss = 'mse' #'categorical_crossentropy'  #'kl_divergence'          # 'mse'
 
 activation = 'relu'
 
@@ -101,76 +103,44 @@ elif channel == 'BAC':
   noise_layer = Lambda(BAC_noise, arguments={'epsilon_1_max':train_epsilon,'batch_size':batch_size}, name='noise_layer')
 
 ### Encoder Layers definitions
-inputs_encoder = keras.Input(shape = (2**k,))
-x = Dense(units=S*2**(k), activation=activation,kernel_regularizer=regularizers.l2(0.01))(inputs_encoder)
+inputs_encoder = keras.Input(shape = (k,),name='input_encoder')
+x = Dense(units=512, activation=activation)(inputs_encoder)
 x = BatchNormalization()(x)
-x = Dropout(0.01)(x)
-x = Reshape((S*2**(k),1))(x)
-x2 = Conv1D(filters=4,kernel_size=3, activation=activation, padding='same',dilation_rate=2)(x)
-x3 = MaxPooling1D(2)(x2)
-flat = Flatten()(x3)
-outputs_encoder = Dense(units=N, activation='sigmoid')(flat)
+x = Dense(units=256, activation=activation)(x)
+x = BatchNormalization()(x)
+outputs_encoder = Dense(units=N, activation='sigmoid')(x)
 model_encoder = keras.Model(inputs=inputs_encoder, outputs=outputs_encoder, name = 'encoder_model')
-model_encoder.summary()
+
 ### Decoder Layers definitions
-inputs_decoder = keras.Input(shape=(N,))
-d2 = Reshape((N,1))(inputs_decoder)
-d3 = Conv1D(filters=4,kernel_size=3,strides=1, activation=activation, padding='same')(d2)
-d4 = UpSampling1D(2)(d3)
-d4 = BatchNormalization()(d4)
-flat = Flatten()(d4)
-x = Dense(units=S * 2 ** (k), activation=activation,kernel_regularizer=regularizers.l2(0.01))(flat)
+inputs_decoder = keras.Input(shape=(N,),name='input_decoder')
+x = Dense(units=128, activation=activation)(inputs_decoder)
 x = BatchNormalization()(x)
-x = Dropout(0.01)(x)
+x = Dense(units=64, activation=activation)(x)
+x = BatchNormalization()(x)
 outputs_decoder = Dense(units=2**k, activation='softmax')(x)
 model_decoder = keras.Model(inputs=inputs_decoder, outputs=outputs_decoder, name = 'decoder_model')
 
-
-# ### Encoder Layers definitions
-# inputs_encoder = Input(batch_shape=(None,2**k,1))
-#
-# x = Conv1D(filters=8,kernel_size=3, activation=activation, padding='same')(inputs_encoder)
-# x = MaxPooling1D(2)(x)
-# x1 = BatchNormalization()(x)
-# x2 = Conv1D(filters=4,kernel_size=3, activation=activation, padding='same',dilation_rate=2)(x1)
-# x3 = MaxPooling1D(2)(x2)
-# flat = Flatten()(x3)
-# outputs_encoder = Dense(units=N, activation='sigmoid')(flat)
-# model_encoder = keras.Model(inputs=inputs_encoder, outputs=outputs_encoder, name = 'encoder_model')
-#
-# ### Decoder Layers definitions
-# inputs_decoder = keras.Input(shape = N)
-# d2 = Reshape((N,1))(inputs_decoder)
-# d3 = Conv1D(filters=4,kernel_size=3,strides=1, activation=activation, padding='same')(d2)
-# # d3 = BatchNormalization()(d3)
-# d4 = UpSampling1D(2)(d3)
-# d5 = Conv1D(filters=8,kernel_size=3, activation=activation, padding='same',dilation_rate=2)(d4)
-# d5 = BatchNormalization()(d5)
-# d7= UpSampling1D(2)(d5)
-# flat = Flatten()(d7)
-# outputs_decoder = Dense(units=2**k, activation='softmax')(flat)
-# model_decoder = keras.Model(inputs=inputs_decoder, outputs=outputs_decoder)
-
 ### Meta model Layers definitions
-inputs_meta = keras.Input(shape = (2**k,))
+inputs_meta = keras.Input(shape = (k,),name='input_meta')
 encoded_bits = model_encoder(inputs_meta)
 rounded_bits = Lambda(gradient_stopper,name='rounding_layer')(encoded_bits)
 noisy_bits = noise_layer(rounded_bits)
 decoded_bits = model_decoder(noisy_bits)
-meta_model = keras.Model(inputs=inputs_meta, outputs=decoded_bits,name = 'meta_model')
+output_bits = Lambda(gradient_stopper,name='output_rounding_layer')(decoded_bits)
+meta_model = keras.Model(inputs=inputs_meta, outputs=output_bits,name = 'meta_model')
 
 ### Model print summary
-model_encoder.summary()
-model_decoder.summary()
-meta_model.summary()
+# model_encoder.summary()
+# model_decoder.summary()
+# meta_model.summary()
 
 ### Compile our models
-model_encoder.compile(loss='binary_crossentropy', optimizer=optimizer)
+model_encoder.compile(loss=loss, optimizer=optimizer)
 model_decoder.compile(loss=loss, optimizer=optimizer)
-meta_model.compile(loss=loss,loss_weights=1, optimizer=optimizer, metrics=['accuracy'])
+meta_model.compile(loss=loss, optimizer=optimizer, metrics=['accuracy'])
 
 ### Fit the model
-history = meta_model.fit(In, In, epochs=epoch,verbose=2, shuffle=True, batch_size=batch_size,validation_data=(In, In))
+history = meta_model.fit(U_k, In, epochs=epoch,verbose=2, shuffle=False, batch_size=batch_size,validation_data=(U_k,In))
 print("The model is ready to be used...")
 # print(history.history)
 
@@ -216,6 +186,7 @@ def bit_error_rate_NN(N, k, C, Nb_sequences, e0, e1, channel = 'BSC' ):
 
     for ep1 in (ep1 for ep1 in e1 if ep1 + ep0 <= 1 and ep1 <= ep0):
       if ep1 == ep0 or ep1 == e0[0]:
+      # if ep1 == ep0:
         N_errors = 0
         N_errors_bler = 0
         N_iter = 0
@@ -232,7 +203,8 @@ def bit_error_rate_NN(N, k, C, Nb_sequences, e0, e1, channel = 'BSC' ):
 
           for i in range(len(u)):
             N_errors += np.sum(np.abs(np.array(u[i]) - np.array(u_nn[i])))  # bit error rate compute with NN
-            N_errors_bler += np.sum(1.0*(u[i] != u_nn[i]))
+            N_errors_bler += np.sum(1.0 * (u[i] != u_nn[i]))
+
         ber_row.append(N_errors / (k * 1.0 * Nb_sequences)) # bit error rate compute with NN
         bler_row.append(N_errors_bler / (1.0 * Nb_sequences)) # block error rate compute with NN
 
@@ -247,14 +219,13 @@ def bit_error_rate_NN(N, k, C, Nb_sequences, e0, e1, channel = 'BSC' ):
 def BER_NN(nb_pkts=100):
   # e0 = np.logspace(-3, 0, 15)
   # e0 = np.linspace(0.001, 0.999, 11)
-  e0 = np.concatenate((np.linspace(0.001, 0.2, 10, endpoint=False), np.linspace(0.2, 1, 8)), axis=0)
+  e0 = np.concatenate((np.array([0.001]), np.linspace(0.01, 0.1, 10, endpoint=False), np.linspace(0.1, 1, 15)), axis=0)
   e0[len(e0) - 1] = e0[len(e0) - 1] - 0.001
   e1 = [t for t in e0 if t <= 0.5]
 
-  one_hot = np.eye(2 ** k)
-
-  C = np.round(model_encoder.predict(one_hot)).astype('int')
+  C = np.round(model_encoder.predict(u_k)).astype('int')
   print('codebook\n', C)
+  print('codebook C is Linear? ', utils.isLinear(C))
   aux = []
   for code in C.tolist():
     if code not in aux:
@@ -271,11 +242,11 @@ def BER_NN(nb_pkts=100):
     BLER = test.saved_results(BLER, N, k,'BLER')
     print("NN BER")
     t = time.time()
-    BER['auto_non_inter_cnn'],BLER['auto_non_inter_cnn'] = bit_error_rate_NN(N, k, C, nb_pkts, e0, e1,channel)
+    BER['auto-non-inter'],BLER['auto-non-inter'] = bit_error_rate_NN(N, k, C, nb_pkts, e0, e1,channel)
     t = time.time()-t
     print(f"NN time = {t}s ========================")
-    print("BER['auto-NN'] = ", BER['auto_non_inter_cnn'])
-    print("BLER['auto-NN'] = ", BLER['auto_non_inter_cnn'])
+    print("BER['auto-NN'] = ", BER['auto-non-inter'])
+    print("BLER['auto-NN'] = ", BLER['auto-non-inter'])
 
     if MAP_test:
       print("MAP BER")
